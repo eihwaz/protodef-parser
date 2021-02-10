@@ -1,0 +1,18 @@
+[package]
+name = "protodef-parser"
+version = "0.1.0"
+authors = ["vagola <vladislavs.golubs@yandex.ru>"]
+edition = "2018"
+description = "Protodef specification parser"
+license = "MIT"
+homepage = "https://github.com/eihwaz/protodef-parser"
+repository = "https://github.com/eihwaz/protodef-parser"
+keywords = ["protodef"]
+readme = "README.md"
+
+[dependencies]
+serde = "1.0.120"
+serde_json = "1.0"
+
+[dev-dependencies]
+serde_test = "1.0"
