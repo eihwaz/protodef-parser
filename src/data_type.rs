@@ -46,6 +46,13 @@ pub enum Structure {
     },
     /// Represents a list of named values.
     Container { fields: Vec<Field> },
+    /// Represents a count field for an array or a buffer.
+    Count {
+        /// The type of count
+        count_type: DataType,
+        /// A field to count for.
+        count_for: String,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -263,9 +270,29 @@ impl<'de> Visitor<'de> for StructureVisitor {
                     elements_type,
                 })
             }
+            "count" => {
+                let mut count_fields: HashMap<String, String> = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                let untyped_count_type = count_fields
+                    .get("type")
+                    .ok_or_else(|| de::Error::missing_field("type"))?;
+
+                let count_type = DataTypeVisitor.visit_str(untyped_count_type)?;
+
+                let count_for = count_fields
+                    .remove("countFor")
+                    .ok_or_else(|| de::Error::missing_field("countFor"))?;
+
+                Ok(Structure::Count {
+                    count_type,
+                    count_for,
+                })
+            }
             unknown_variant => Err(de::Error::unknown_variant(
                 unknown_variant,
-                &["container", "array"],
+                &["container", "array", "count"],
             )),
         }
     }
@@ -593,7 +620,7 @@ mod tests {
         assert_de_tokens(
             &array,
             &[
-                Token::Seq { len: None },
+                Token::Seq { len: Some(2) },
                 Token::String("array"),
                 Token::Struct { name: "", len: 2 },
                 Token::Str("countType"),
@@ -621,7 +648,7 @@ mod tests {
         assert_de_tokens(
             &array,
             &[
-                Token::Seq { len: None },
+                Token::Seq { len: Some(2) },
                 Token::String("array"),
                 Token::Struct { name: "", len: 2 },
                 Token::Str("countType"),
@@ -641,6 +668,29 @@ mod tests {
                 Token::StructEnd,
                 Token::SeqEnd,
                 Token::SeqEnd,
+                Token::StructEnd,
+                Token::SeqEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_decode_count_data_type() {
+        let count = Structure::Count {
+            count_type: DataType::Numeric(Numeric::VarInt),
+            count_for: "test".to_string(),
+        };
+
+        assert_de_tokens(
+            &count,
+            &[
+                Token::Seq { len: Some(2) },
+                Token::String("count"),
+                Token::Struct { name: "", len: 2 },
+                Token::Str("type"),
+                Token::String("varint"),
+                Token::Str("countFor"),
+                Token::String("test"),
                 Token::StructEnd,
                 Token::SeqEnd,
             ],
