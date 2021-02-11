@@ -1,7 +1,7 @@
 pub mod data_type;
 
-use crate::data_type::{DataType, DataTypeVisitor};
-use serde::de::Visitor;
+use crate::data_type::DataType;
+use serde::de::{IntoDeserializer, Visitor};
 use serde::{de, Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fmt;
@@ -46,9 +46,10 @@ impl<'de> Visitor<'de> for ProtocolTypeVisitor {
     {
         match value {
             "native" => Ok(ProtocolType::Native),
-            _ => Ok(ProtocolType::DataType(
-                DataTypeVisitor.visit_str::<E>(value)?,
-            )),
+            _ => {
+                let data_type = DataType::deserialize(value.into_deserializer())?;
+                Ok(ProtocolType::DataType(data_type))
+            }
         }
     }
 }

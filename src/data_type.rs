@@ -1,10 +1,11 @@
 use serde::de;
-use serde::de::{SeqAccess, Unexpected, Visitor};
+use serde::de::{IntoDeserializer, SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+#[serde(untagged)]
 pub enum DataType {
     Numeric(Numeric),
     Primitive(Primitive),
@@ -61,49 +62,6 @@ pub struct Field {
     pub name: String,
     #[serde(rename = "type")]
     pub field_type: DataType,
-}
-
-impl<'de> Deserialize<'de> for DataType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, <D>::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(DataTypeVisitor)
-    }
-}
-
-pub struct DataTypeVisitor;
-
-impl<'de> Visitor<'de> for DataTypeVisitor {
-    type Value = DataType;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an valid type string or sequence")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        if let Ok(value) = NumericVisitor.visit_str::<E>(value) {
-            return Ok(DataType::Numeric(value));
-        }
-
-        if let Ok(value) = PrimitiveVisitor.visit_str::<E>(value) {
-            return Ok(DataType::Primitive(value));
-        }
-
-        Ok(DataType::Custom(value.to_string()))
-    }
-
-    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, <A as SeqAccess<'de>>::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        StructureVisitor
-            .visit_seq(seq)
-            .map(|v| DataType::Structure(Box::new(v)))
-    }
 }
 
 struct NumericVisitor;
@@ -277,10 +235,10 @@ impl<'de> Visitor<'de> for StructureVisitor {
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
                 let untyped_count_type = count_fields
-                    .get("type")
+                    .remove("type")
                     .ok_or_else(|| de::Error::missing_field("type"))?;
 
-                let count_type = DataTypeVisitor.visit_str(untyped_count_type)?;
+                let count_type = DataType::deserialize(untyped_count_type.into_deserializer())?;
 
                 let count_for = count_fields
                     .remove("countFor")
