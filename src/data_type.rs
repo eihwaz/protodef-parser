@@ -98,8 +98,12 @@ pub enum Util {
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 pub struct Buffer {
-    #[serde(flatten)]
-    pub array: Array,
+    /// The type of length prefix.
+    #[serde(rename = "countType")]
+    pub count_type: Option<DataType>,
+    /// A reference to the field counting the elements, or a fixed size.
+    pub count: Option<ArrayCount>,
+    /// Represent rest bytes as-is.
     pub rest: bool,
 }
 
