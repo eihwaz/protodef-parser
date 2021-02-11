@@ -30,9 +30,12 @@ pub enum ByteOrder {
     LittleEndian,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Primitive {
+    #[serde(rename = "bool")]
     Boolean,
+    #[serde(rename = "cstring")]
     String,
     Void,
 }
@@ -152,37 +155,6 @@ impl<'de> Deserialize<'de> for Numeric {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_str(NumericVisitor)
-    }
-}
-
-struct PrimitiveVisitor;
-
-impl<'de> Visitor<'de> for PrimitiveVisitor {
-    type Value = Primitive;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an valid primitive type string")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        match value {
-            "bool" => Ok(Primitive::Boolean),
-            "cstring" => Ok(Primitive::String),
-            "void" => Ok(Primitive::Void),
-            _ => Err(de::Error::invalid_value(Unexpected::Str(&value), &self)),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Primitive {
-    fn deserialize<D>(deserializer: D) -> Result<Self, <D>::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(PrimitiveVisitor)
     }
 }
 
@@ -455,17 +427,38 @@ mod tests {
 
     #[test]
     fn test_decode_boolean() {
-        assert_de_tokens(&Primitive::Boolean, &[Token::String("bool")]);
+        assert_de_tokens(
+            &Primitive::Boolean,
+            &[
+                Token::Enum { name: "Primitive" },
+                Token::String("bool"),
+                Token::Unit,
+            ],
+        );
     }
 
     #[test]
     fn test_decode_string() {
-        assert_de_tokens(&Primitive::String, &[Token::String("cstring")]);
+        assert_de_tokens(
+            &Primitive::String,
+            &[
+                Token::Enum { name: "Primitive" },
+                Token::String("cstring"),
+                Token::Unit,
+            ],
+        );
     }
 
     #[test]
     fn test_decode_void() {
-        assert_de_tokens(&Primitive::Void, &[Token::String("void")]);
+        assert_de_tokens(
+            &Primitive::Void,
+            &[
+                Token::Enum { name: "Primitive" },
+                Token::String("void"),
+                Token::Unit,
+            ],
+        );
     }
 
     #[test]
