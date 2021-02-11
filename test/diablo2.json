@@ -168,6 +168,35 @@
             "type": "string"
           }
         ]
+      ],
+      "packet": [
+        "container",
+        [
+          {
+            "name": "size",
+            "type": "lu16"
+          },
+          {
+            "name": "name",
+            "type": [
+              "mapper",
+              {
+                "type": "lu8",
+                "mappings": {
+                  "0x01": "MCP_STARTUP",
+                  "0x02": "MCP_CHARCREATE",
+                  "0x03": "MCP_CREATEGAME",
+                  "0x04": "MCP_JOINGAME",
+                  "0x05": "MCP_GAMELIST",
+                  "0x06": "MCP_GAMEINFO",
+                  "0x07": "MCP_CHARLOGON",
+                  "0x12": "MCP_MOTD",
+                  "0x19": "MCP_CHARLIST2"
+                }
+              }
+            ]
+          }
+        ]
       ]
     }
   },
@@ -379,6 +408,36 @@
           {
             "name": "position",
             "type": "lu32"
+          }
+        ]
+      ],
+      "packet": [
+        "container",
+        [
+          {
+            "name": "size",
+            "type": "lu16"
+          },
+          {
+            "name": "name",
+            "type": [
+              "mapper",
+              {
+                "type": "lu8",
+                "mappings": {
+                  "0x01": "MCP_STARTUP",
+                  "0x02": "MCP_CHARCREATE",
+                  "0x03": "MCP_CREATEGAME",
+                  "0x04": "MCP_JOINGAME",
+                  "0x05": "MCP_GAMELIST",
+                  "0x06": "MCP_GAMEINFO",
+                  "0x07": "MCP_CHARLOGON",
+                  "0x12": "MCP_MOTD",
+                  "0x14": "MCP_CREATEQUEUE",
+                  "0x19": "MCP_CHARLIST2"
+                }
+              }
+            ]
           }
         ]
       ]

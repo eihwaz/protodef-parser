@@ -11,6 +11,7 @@ pub enum DataType {
     Numeric(Numeric),
     Primitive(Primitive),
     Structure(Box<Structure>),
+    Util(Util),
     Custom(String),
 }
 
@@ -77,6 +78,18 @@ pub struct Field {
     pub name: String,
     #[serde(rename = "type")]
     pub field_type: DataType,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Util {
+    Mapper(Mapper),
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+pub struct Mapper {
+    #[serde(rename = "type")]
+    mappings_type: String,
+    mappings: HashMap<String, String>,
 }
 
 struct NumericVisitor;
@@ -176,7 +189,7 @@ impl<'de> Visitor<'de> for StructureVisitor {
     type Value = Structure;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an valid primitive structure seq")
+        formatter.write_str("an valid structure")
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, <A as SeqAccess<'de>>::Error>
@@ -273,6 +286,45 @@ impl<'de> Deserialize<'de> for Structure {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_seq(StructureVisitor)
+    }
+}
+
+struct UtilVisitor;
+
+impl<'de> Visitor<'de> for UtilVisitor {
+    type Value = Util;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an valid util")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, <A as SeqAccess<'de>>::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let util_type: String = seq
+            .next_element()?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+
+        match util_type.as_str() {
+            "mapper" => {
+                let mapper = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                Ok(Util::Mapper(mapper))
+            }
+            unknown_variant => Err(de::Error::unknown_variant(unknown_variant, &["mapper"])),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Util {
+    fn deserialize<D>(deserializer: D) -> Result<Self, <D>::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(UtilVisitor)
     }
 }
 
