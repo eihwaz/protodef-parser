@@ -83,7 +83,7 @@
             "type": [
               "array",
               {
-                "countType": "lu32",
+                "count": 2,
                 "type": "lu32"
               }
             ]
@@ -93,7 +93,7 @@
             "type": [
               "array",
               {
-                "countType": "lu32",
+                "count": 12,
                 "type": "lu32"
               }
             ]
@@ -189,7 +189,7 @@
         {
           "name": "IPOfD2GSServer",
           "type": ["array", {
-            "countType": "lu32",
+            "count": 4,
             "type": "lu8"
           }]
         },
@@ -340,14 +340,14 @@
           {
             "name": "classes",
             "type": ["array",{
-              "countType": "lu32",
+              "count": "nbCharacters",
               "type": "lu8"
             }]
           },
           {
             "name": "levels",
             "type": ["array",{
-              "countType": "lu32",
+              "count": "nbCharacters",
               "type": "lu8"
             }]
           },
@@ -358,7 +358,7 @@
           {
             "name": "names",
             "type": ["array",{
-              "countType": "lu32",
+              "count": "nbCharacters",
               "type": "string"
             }]
           }

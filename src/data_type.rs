@@ -1,6 +1,7 @@
 use serde::de;
 use serde::de::{IntoDeserializer, SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -45,7 +46,9 @@ pub enum Structure {
     /// Represents a list of values with same type.
     Array {
         /// The type of length prefix.
-        count_type: DataType,
+        count_type: Option<DataType>,
+        /// A reference to the field counting the elements, or a fixed size.
+        count: Option<ArrayCount>,
         /// The type of the elements.
         elements_type: DataType,
     },
@@ -58,6 +61,15 @@ pub enum Structure {
         /// A field to count for.
         count_for: String,
     },
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum ArrayCount {
+    /// Reference to the field counting the elements.
+    FieldReference(String),
+    /// Array with fixed length.
+    FixedLength(u32),
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -184,20 +196,46 @@ impl<'de> Visitor<'de> for StructureVisitor {
                 Ok(Structure::Container { fields })
             }
             "array" => {
-                let mut array_fields: HashMap<String, DataType> = seq
+                let mut array_fields: HashMap<String, Value> = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
-                let count_type = array_fields
-                    .remove("countType")
-                    .ok_or_else(|| de::Error::missing_field("countType"))?;
+                let untyped_count_type_opt = array_fields.remove("countType");
+                let untyped_count_opt = array_fields.remove("count");
 
-                let elements_type = array_fields
+                let untyped_elements_type = array_fields
                     .remove("type")
                     .ok_or_else(|| de::Error::missing_field("type"))?;
 
+                let elements_type =
+                    DataType::deserialize(untyped_elements_type.into_deserializer())
+                        .map_err(|_| de::Error::custom("Invalid `elements_type` type"))?;
+
+                let (count_type, count) = match (untyped_count_type_opt, untyped_count_opt) {
+                    (Some(untyped_count_type), None) => {
+                        let count_type =
+                            DataType::deserialize(untyped_count_type.into_deserializer())
+                                .map_err(|_| de::Error::custom("Invalid `count_type` type"))?;
+
+                        (Some(count_type), None)
+                    }
+                    (None, Some(untyped_count)) => {
+                        let count = if let Some(length) = untyped_count.as_u64() {
+                            ArrayCount::FixedLength(length as u32)
+                        } else if let Some(field) = untyped_count.as_str() {
+                            ArrayCount::FieldReference(field.to_owned())
+                        } else {
+                            return Err(de::Error::custom("Invalid `count` type"));
+                        };
+
+                        (None, Some(count))
+                    }
+                    _ => return Err(de::Error::missing_field("countType or count")),
+                };
+
                 Ok(Structure::Array {
                     count_type,
+                    count,
                     elements_type,
                 })
             }
@@ -240,7 +278,7 @@ impl<'de> Deserialize<'de> for Structure {
 
 #[cfg(test)]
 mod tests {
-    use crate::data_type::{ByteOrder, DataType, Field, Numeric, Primitive, Structure};
+    use crate::data_type::{ArrayCount, ByteOrder, DataType, Field, Numeric, Primitive, Structure};
     use serde_test::{assert_de_tokens, Token};
 
     #[test]
@@ -565,7 +603,8 @@ mod tests {
     #[test]
     fn test_decode_array_data_type() {
         let array = Structure::Array {
-            count_type: DataType::Numeric(Numeric::VarInt),
+            count_type: Some(DataType::Numeric(Numeric::VarInt)),
+            count: None,
             elements_type: DataType::Primitive(Primitive::String),
         };
 
@@ -593,7 +632,8 @@ mod tests {
         }];
 
         let array = Structure::Array {
-            count_type: DataType::Numeric(Numeric::VarInt),
+            count_type: Some(DataType::Numeric(Numeric::VarInt)),
+            count: None,
             elements_type: DataType::Structure(Box::new(Structure::Container { fields })),
         };
 
@@ -604,6 +644,7 @@ mod tests {
                 Token::String("array"),
                 Token::Struct { name: "", len: 2 },
                 Token::Str("countType"),
+                Token::Some,
                 Token::String("varint"),
                 Token::Str("type"),
                 Token::Seq { len: Some(2) },
@@ -643,6 +684,54 @@ mod tests {
                 Token::String("varint"),
                 Token::Str("countFor"),
                 Token::String("test"),
+                Token::StructEnd,
+                Token::SeqEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_decode_array_ref_field() {
+        let array = Structure::Array {
+            count_type: None,
+            count: Some(ArrayCount::FieldReference("field".to_string())),
+            elements_type: DataType::Primitive(Primitive::String),
+        };
+
+        assert_de_tokens(
+            &array,
+            &[
+                Token::Seq { len: Some(2) },
+                Token::String("array"),
+                Token::Struct { name: "", len: 2 },
+                Token::Str("count"),
+                Token::String("field"),
+                Token::Str("type"),
+                Token::String("cstring"),
+                Token::StructEnd,
+                Token::SeqEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_decode_array_fixed_length() {
+        let array = Structure::Array {
+            count_type: None,
+            count: Some(ArrayCount::FixedLength(4)),
+            elements_type: DataType::Primitive(Primitive::String),
+        };
+
+        assert_de_tokens(
+            &array,
+            &[
+                Token::Seq { len: Some(2) },
+                Token::String("array"),
+                Token::Struct { name: "", len: 2 },
+                Token::Str("count"),
+                Token::I32(4),
+                Token::Str("type"),
+                Token::String("cstring"),
                 Token::StructEnd,
                 Token::SeqEnd,
             ],
