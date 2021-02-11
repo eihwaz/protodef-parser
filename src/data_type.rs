@@ -9,6 +9,7 @@ pub enum DataType {
     Numeric(Numeric),
     Primitive(Primitive),
     Structure(Box<Structure>),
+    Custom(String),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -67,11 +68,11 @@ impl<'de> Deserialize<'de> for DataType {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(DataTypeVisitor)
+        deserializer.deserialize_str(DataTypeVisitor)
     }
 }
 
-struct DataTypeVisitor;
+pub struct DataTypeVisitor;
 
 impl<'de> Visitor<'de> for DataTypeVisitor {
     type Value = DataType;
@@ -92,7 +93,7 @@ impl<'de> Visitor<'de> for DataTypeVisitor {
             return Ok(DataType::Primitive(value));
         }
 
-        Err(de::Error::invalid_value(Unexpected::Str(value), &self))
+        Ok(DataType::Custom(value.to_string()))
     }
 
     fn visit_seq<A>(self, seq: A) -> Result<Self::Value, <A as SeqAccess<'de>>::Error>
