@@ -10,7 +10,7 @@ pub enum DataType {
     Numeric(Numeric),
     Primitive(Primitive),
     Structure(Box<Structure>),
-    Util(Util),
+    Util(Box<Util>),
     Custom(String),
 }
 
@@ -46,7 +46,7 @@ pub enum Structure {
     /// Represents a list of values with same type.
     Array(Array),
     /// Represents a list of named values.
-    Container { fields: Vec<Field> },
+    Container(Vec<Field>),
     /// Represents a count field for an array or a buffer.
     Count(Count),
 }
@@ -91,8 +91,16 @@ pub struct Count {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Util {
+    Buffer(Buffer),
     Mapper(Mapper),
     Bitfield(Vec<BitField>),
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+pub struct Buffer {
+    #[serde(flatten)]
+    pub array: Array,
+    pub rest: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -223,7 +231,7 @@ impl<'de> Visitor<'de> for StructureVisitor {
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
-                Ok(Structure::Container { fields })
+                Ok(Structure::Container(fields))
             }
             "array" => {
                 let array = seq
@@ -274,6 +282,13 @@ impl<'de> Visitor<'de> for UtilVisitor {
             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
         match util_type.as_str() {
+            "buffer" => {
+                let buffer = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                Ok(Util::Buffer(buffer))
+            }
             "mapper" => {
                 let mapper = seq
                     .next_element()?
@@ -281,7 +296,17 @@ impl<'de> Visitor<'de> for UtilVisitor {
 
                 Ok(Util::Mapper(mapper))
             }
-            unknown_variant => Err(de::Error::unknown_variant(unknown_variant, &["mapper"])),
+            "bitfield" => {
+                let bitfields = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                Ok(Util::Bitfield(bitfields))
+            }
+            unknown_variant => Err(de::Error::unknown_variant(
+                unknown_variant,
+                &["buffer", "mapper", "bitfield"],
+            )),
         }
     }
 }
@@ -548,7 +573,7 @@ mod tests {
             }),
         }];
 
-        let container = Structure::Container { fields };
+        let container = Structure::Container(fields);
 
         assert_de_tokens(
             &container,
@@ -580,12 +605,10 @@ mod tests {
 
         let fields = vec![Field {
             name: "inner_container".to_string(),
-            field_type: DataType::Structure(Box::new(Structure::Container {
-                fields: inner_container_fields,
-            })),
+            field_type: DataType::Structure(Box::new(Structure::Container(inner_container_fields))),
         }];
 
-        let container = Structure::Container { fields };
+        let container = Structure::Container(fields);
 
         assert_de_tokens(
             &container,
@@ -659,7 +682,7 @@ mod tests {
         let array = Structure::Array(Array {
             count_type: Some(DataType::Numeric(Numeric::VarInt)),
             count: None,
-            elements_type: DataType::Structure(Box::new(Structure::Container { fields })),
+            elements_type: DataType::Structure(Box::new(Structure::Container(fields))),
         });
 
         assert_de_tokens(
