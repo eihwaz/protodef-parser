@@ -92,6 +92,7 @@ pub struct Count {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Util {
     Mapper(Mapper),
+    Bitfield(Vec<BitField>),
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -99,6 +100,13 @@ pub struct Mapper {
     #[serde(rename = "type")]
     mappings_type: String,
     mappings: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub struct BitField {
+    name: String,
+    size: usize,
+    signed: bool,
 }
 
 struct NumericVisitor;
