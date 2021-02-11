@@ -68,7 +68,7 @@ impl<'de> Deserialize<'de> for DataType {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_str(DataTypeVisitor)
+        deserializer.deserialize_any(DataTypeVisitor)
     }
 }
 
@@ -78,7 +78,7 @@ impl<'de> Visitor<'de> for DataTypeVisitor {
     type Value = DataType;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an valid type string or seq")
+        formatter.write_str("an valid type string or sequence")
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>

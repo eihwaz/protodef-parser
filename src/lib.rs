@@ -3,7 +3,27 @@ pub mod data_type;
 use crate::data_type::{DataType, DataTypeVisitor};
 use serde::de::Visitor;
 use serde::{de, Deserialize, Deserializer};
+use std::collections::HashMap;
 use std::fmt;
+use std::io::Read;
+
+pub fn read_protocol<R: Read>(reader: &mut R) -> serde_json::Result<Protocol> {
+    serde_json::from_reader(reader)
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+pub struct Protocol {
+    pub types: HashMap<String, ProtocolType>,
+    #[serde(flatten)]
+    pub namespaces: HashMap<String, Namespace>,
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum Namespace {
+    Map(HashMap<String, Namespace>),
+    DataType(DataType),
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ProtocolType {
@@ -45,8 +65,17 @@ impl<'de> Deserialize<'de> for ProtocolType {
 #[cfg(test)]
 mod tests {
     use crate::data_type::{DataType, Numeric};
-    use crate::ProtocolType;
+    use crate::{read_protocol, ProtocolType};
     use serde_test::{assert_de_tokens, Token};
+    use std::fs::File;
+
+    #[test]
+    fn test_diablo2_protocol_read() {
+        let mut file = File::open("test/diablo2.json").expect("Failed to read file");
+        let protocol = read_protocol(&mut file).expect("Failed to read protocol");
+
+        println!("{:#?}", protocol)
+    }
 
     #[test]
     fn test_decode_native_protocol_type() {
