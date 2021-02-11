@@ -1,7 +1,6 @@
 use serde::de;
-use serde::de::{IntoDeserializer, SeqAccess, Unexpected, Visitor};
+use serde::de::{SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -45,23 +44,23 @@ pub enum Primitive {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Structure {
     /// Represents a list of values with same type.
-    Array {
-        /// The type of length prefix.
-        count_type: Option<DataType>,
-        /// A reference to the field counting the elements, or a fixed size.
-        count: Option<ArrayCount>,
-        /// The type of the elements.
-        elements_type: DataType,
-    },
+    Array(Array),
     /// Represents a list of named values.
     Container { fields: Vec<Field> },
     /// Represents a count field for an array or a buffer.
-    Count {
-        /// The type of count
-        count_type: DataType,
-        /// A field to count for.
-        count_for: String,
-    },
+    Count(Count),
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+pub struct Array {
+    /// The type of length prefix.
+    #[serde(rename = "countType")]
+    count_type: Option<DataType>,
+    /// A reference to the field counting the elements, or a fixed size.
+    count: Option<ArrayCount>,
+    /// The type of the elements.
+    #[serde(rename = "type")]
+    elements_type: DataType,
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -78,6 +77,16 @@ pub struct Field {
     pub name: String,
     #[serde(rename = "type")]
     pub field_type: DataType,
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+pub struct Count {
+    /// The type of count.
+    #[serde(rename = "type")]
+    count_type: DataType,
+    /// A field to count for.
+    #[serde(rename = "countFor")]
+    count_for: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -209,68 +218,18 @@ impl<'de> Visitor<'de> for StructureVisitor {
                 Ok(Structure::Container { fields })
             }
             "array" => {
-                let mut array_fields: HashMap<String, Value> = seq
+                let array = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
-                let untyped_count_type_opt = array_fields.remove("countType");
-                let untyped_count_opt = array_fields.remove("count");
-
-                let untyped_elements_type = array_fields
-                    .remove("type")
-                    .ok_or_else(|| de::Error::missing_field("type"))?;
-
-                let elements_type =
-                    DataType::deserialize(untyped_elements_type.into_deserializer())
-                        .map_err(|_| de::Error::custom("Invalid `elements_type` type"))?;
-
-                let (count_type, count) = match (untyped_count_type_opt, untyped_count_opt) {
-                    (Some(untyped_count_type), None) => {
-                        let count_type =
-                            DataType::deserialize(untyped_count_type.into_deserializer())
-                                .map_err(|_| de::Error::custom("Invalid `count_type` type"))?;
-
-                        (Some(count_type), None)
-                    }
-                    (None, Some(untyped_count)) => {
-                        let count = if let Some(length) = untyped_count.as_u64() {
-                            ArrayCount::FixedLength(length as u32)
-                        } else if let Some(field) = untyped_count.as_str() {
-                            ArrayCount::FieldReference(field.to_owned())
-                        } else {
-                            return Err(de::Error::custom("Invalid `count` type"));
-                        };
-
-                        (None, Some(count))
-                    }
-                    _ => return Err(de::Error::missing_field("countType or count")),
-                };
-
-                Ok(Structure::Array {
-                    count_type,
-                    count,
-                    elements_type,
-                })
+                Ok(Structure::Array(array))
             }
             "count" => {
-                let mut count_fields: HashMap<String, String> = seq
+                let count = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
-                let untyped_count_type = count_fields
-                    .remove("type")
-                    .ok_or_else(|| de::Error::missing_field("type"))?;
-
-                let count_type = DataType::deserialize(untyped_count_type.into_deserializer())?;
-
-                let count_for = count_fields
-                    .remove("countFor")
-                    .ok_or_else(|| de::Error::missing_field("countFor"))?;
-
-                Ok(Structure::Count {
-                    count_type,
-                    count_for,
-                })
+                Ok(Structure::Count(count))
             }
             unknown_variant => Err(de::Error::unknown_variant(
                 unknown_variant,
@@ -330,7 +289,9 @@ impl<'de> Deserialize<'de> for Util {
 
 #[cfg(test)]
 mod tests {
-    use crate::data_type::{ArrayCount, ByteOrder, DataType, Field, Numeric, Primitive, Structure};
+    use crate::data_type::{
+        Array, ArrayCount, ByteOrder, Count, DataType, Field, Numeric, Primitive, Structure,
+    };
     use serde_test::{assert_de_tokens, Token};
 
     #[test]
@@ -654,19 +615,23 @@ mod tests {
 
     #[test]
     fn test_decode_array_data_type() {
-        let array = Structure::Array {
+        let array = Structure::Array(Array {
             count_type: Some(DataType::Numeric(Numeric::VarInt)),
             count: None,
             elements_type: DataType::Primitive(Primitive::String),
-        };
+        });
 
         assert_de_tokens(
             &array,
             &[
                 Token::Seq { len: Some(2) },
                 Token::String("array"),
-                Token::Struct { name: "", len: 2 },
+                Token::Struct {
+                    name: "Array",
+                    len: 2,
+                },
                 Token::Str("countType"),
+                Token::Some,
                 Token::String("varint"),
                 Token::Str("type"),
                 Token::String("cstring"),
@@ -683,18 +648,21 @@ mod tests {
             field_type: DataType::Numeric(Numeric::VarInt),
         }];
 
-        let array = Structure::Array {
+        let array = Structure::Array(Array {
             count_type: Some(DataType::Numeric(Numeric::VarInt)),
             count: None,
             elements_type: DataType::Structure(Box::new(Structure::Container { fields })),
-        };
+        });
 
         assert_de_tokens(
             &array,
             &[
                 Token::Seq { len: Some(2) },
                 Token::String("array"),
-                Token::Struct { name: "", len: 2 },
+                Token::Struct {
+                    name: "Array",
+                    len: 2,
+                },
                 Token::Str("countType"),
                 Token::Some,
                 Token::String("varint"),
@@ -721,17 +689,20 @@ mod tests {
 
     #[test]
     fn test_decode_count_data_type() {
-        let count = Structure::Count {
+        let count = Structure::Count(Count {
             count_type: DataType::Numeric(Numeric::VarInt),
             count_for: "test".to_string(),
-        };
+        });
 
         assert_de_tokens(
             &count,
             &[
                 Token::Seq { len: Some(2) },
                 Token::String("count"),
-                Token::Struct { name: "", len: 2 },
+                Token::Struct {
+                    name: "Count",
+                    len: 2,
+                },
                 Token::Str("type"),
                 Token::String("varint"),
                 Token::Str("countFor"),
@@ -744,19 +715,23 @@ mod tests {
 
     #[test]
     fn test_decode_array_ref_field() {
-        let array = Structure::Array {
+        let array = Structure::Array(Array {
             count_type: None,
             count: Some(ArrayCount::FieldReference("field".to_string())),
             elements_type: DataType::Primitive(Primitive::String),
-        };
+        });
 
         assert_de_tokens(
             &array,
             &[
                 Token::Seq { len: Some(2) },
                 Token::String("array"),
-                Token::Struct { name: "", len: 2 },
+                Token::Struct {
+                    name: "Array",
+                    len: 2,
+                },
                 Token::Str("count"),
+                Token::Some,
                 Token::String("field"),
                 Token::Str("type"),
                 Token::String("cstring"),
@@ -768,19 +743,23 @@ mod tests {
 
     #[test]
     fn test_decode_array_fixed_length() {
-        let array = Structure::Array {
+        let array = Structure::Array(Array {
             count_type: None,
             count: Some(ArrayCount::FixedLength(4)),
             elements_type: DataType::Primitive(Primitive::String),
-        };
+        });
 
         assert_de_tokens(
             &array,
             &[
                 Token::Seq { len: Some(2) },
                 Token::String("array"),
-                Token::Struct { name: "", len: 2 },
+                Token::Struct {
+                    name: "Array",
+                    len: 2,
+                },
                 Token::Str("count"),
+                Token::Some,
                 Token::I32(4),
                 Token::Str("type"),
                 Token::String("cstring"),
