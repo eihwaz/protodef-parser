@@ -1,3 +1,4 @@
+use linked_hash_map::LinkedHashMap;
 use serde::de;
 use serde::de::{SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -7,11 +8,25 @@ use std::fmt;
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum DataType {
+    Conditional(Box<Conditional>),
     Numeric(Numeric),
     Primitive(Primitive),
     Structure(Box<Structure>),
     Util(Box<Util>),
     Custom(String),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Conditional {
+    Switch(Switch),
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+pub struct Switch {
+    #[serde(rename = "compareTo")]
+    compare_to: String,
+    fields: LinkedHashMap<String, DataType>,
+    default: Option<DataType>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -74,9 +89,11 @@ pub enum ArrayCount {
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 pub struct Field {
-    pub name: String,
+    pub name: Option<String>,
     #[serde(rename = "type")]
     pub field_type: DataType,
+    #[serde(rename = "anon")]
+    anonymous: Option<bool>,
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -94,6 +111,7 @@ pub enum Util {
     Buffer(Buffer),
     Mapper(Mapper),
     Bitfield(Vec<BitField>),
+    PrefixedString { count_type: DataType },
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -104,14 +122,14 @@ pub struct Buffer {
     /// A reference to the field counting the elements, or a fixed size.
     pub count: Option<ArrayCount>,
     /// Represent rest bytes as-is.
-    pub rest: bool,
+    pub rest: Option<bool>,
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 pub struct Mapper {
     #[serde(rename = "type")]
     mappings_type: String,
-    mappings: HashMap<String, String>,
+    mappings: LinkedHashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -212,13 +230,52 @@ impl<'de> Deserialize<'de> for Numeric {
     }
 }
 
+struct ConditionalVisitor;
+
+impl<'de> Visitor<'de> for ConditionalVisitor {
+    type Value = Conditional;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an valid `Conditional`")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, <A as SeqAccess<'de>>::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let conditional_type: String = seq
+            .next_element()?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+
+        match conditional_type.as_str() {
+            "switch" => {
+                let switch = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                Ok(Conditional::Switch(switch))
+            }
+            unknown_variant => Err(de::Error::unknown_variant(unknown_variant, &["switch"])),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Conditional {
+    fn deserialize<D>(deserializer: D) -> Result<Self, <D>::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(ConditionalVisitor)
+    }
+}
+
 struct StructureVisitor;
 
 impl<'de> Visitor<'de> for StructureVisitor {
     type Value = Structure;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an valid structure")
+        formatter.write_str("an valid `Structure`")
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, <A as SeqAccess<'de>>::Error>
@@ -307,9 +364,20 @@ impl<'de> Visitor<'de> for UtilVisitor {
 
                 Ok(Util::Bitfield(bitfields))
             }
+            "pstring" => {
+                let mut map: HashMap<String, DataType> = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                let count_type = map
+                    .remove("countType")
+                    .ok_or_else(|| de::Error::missing_field("countType"))?;
+
+                Ok(Util::PrefixedString { count_type })
+            }
             unknown_variant => Err(de::Error::unknown_variant(
                 unknown_variant,
-                &["buffer", "mapper", "bitfield"],
+                &["buffer", "mapper", "bitfield", "pstring"],
             )),
         }
     }
@@ -326,8 +394,10 @@ impl<'de> Deserialize<'de> for Util {
 
 #[cfg(test)]
 mod tests {
+    use crate::data_type::Numeric::Int;
     use crate::data_type::{
-        Array, ArrayCount, ByteOrder, Count, DataType, Field, Numeric, Primitive, Structure,
+        Array, ArrayCount, Buffer, ByteOrder, Count, DataType, Field, Numeric, Primitive,
+        Structure, Util,
     };
     use serde_test::{assert_de_tokens, Token};
 
@@ -570,11 +640,12 @@ mod tests {
     #[test]
     fn test_decode_container_data_type() {
         let fields = vec![Field {
-            name: "serverPort".to_string(),
+            name: Some("serverPort".to_string()),
             field_type: DataType::Numeric(Numeric::Short {
                 signed: false,
                 byte_order: ByteOrder::BigEndian,
             }),
+            anonymous: None,
         }];
 
         let container = Structure::Container(fields);
@@ -590,6 +661,7 @@ mod tests {
                     len: 2,
                 },
                 Token::Str("name"),
+                Token::Some,
                 Token::String("serverPort"),
                 Token::Str("type"),
                 Token::String("u16"),
@@ -603,13 +675,15 @@ mod tests {
     #[test]
     fn test_decode_container_with_container_data_type() {
         let inner_container_fields = vec![Field {
-            name: "name".to_string(),
+            name: Some("name".to_string()),
             field_type: DataType::Numeric(Numeric::VarInt),
+            anonymous: None,
         }];
 
         let fields = vec![Field {
-            name: "inner_container".to_string(),
+            name: Some("inner_container".to_string()),
             field_type: DataType::Structure(Box::new(Structure::Container(inner_container_fields))),
+            anonymous: None,
         }];
 
         let container = Structure::Container(fields);
@@ -625,6 +699,7 @@ mod tests {
                     len: 2,
                 },
                 Token::Str("name"),
+                Token::Some,
                 Token::String("inner_container"),
                 Token::Str("type"),
                 Token::Seq { len: Some(2) },
@@ -679,8 +754,9 @@ mod tests {
     #[test]
     fn test_decode_array_with_container_data_type() {
         let fields = vec![Field {
-            name: "name".to_string(),
+            name: Some("name".to_string()),
             field_type: DataType::Numeric(Numeric::VarInt),
+            anonymous: None,
         }];
 
         let array = Structure::Array(Array {
@@ -798,6 +874,55 @@ mod tests {
                 Token::I32(4),
                 Token::Str("type"),
                 Token::String("cstring"),
+                Token::StructEnd,
+                Token::SeqEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_decode_prefixed_string() {
+        let util = Util::PrefixedString {
+            count_type: DataType::Numeric(Numeric::VarInt),
+        };
+
+        assert_de_tokens(
+            &util,
+            &[
+                Token::Seq { len: Some(2) },
+                Token::String("pstring"),
+                Token::Struct { name: "", len: 1 },
+                Token::Str("countType"),
+                Token::String("varint"),
+                Token::StructEnd,
+                Token::SeqEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_decode_buffer() {
+        let util = Util::Buffer(Buffer {
+            count_type: Some(DataType::Numeric(Int {
+                signed: true,
+                byte_order: ByteOrder::BigEndian,
+            })),
+            count: None,
+            rest: None,
+        });
+
+        assert_de_tokens(
+            &util,
+            &[
+                Token::Seq { len: Some(2) },
+                Token::String("buffer"),
+                Token::Struct {
+                    name: "Buffer",
+                    len: 1,
+                },
+                Token::Str("countType"),
+                Token::Some,
+                Token::String("i32"),
                 Token::StructEnd,
                 Token::SeqEnd,
             ],
