@@ -19,10 +19,12 @@ pub enum DataType {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Conditional {
     Switch(Switch),
+    Option(DataType),
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 pub struct Switch {
+    name: Option<String>,
     #[serde(rename = "compareTo")]
     compare_to: String,
     fields: LinkedHashMap<String, DataType>,
@@ -112,6 +114,7 @@ pub enum Util {
     Mapper(Mapper),
     Bitfield(Vec<BitField>),
     PrefixedString { count_type: DataType },
+    Loop(Box<Loop>),
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -137,6 +140,14 @@ pub struct BitField {
     name: String,
     size: usize,
     signed: bool,
+}
+
+#[derive(Debug, Eq, PartialEq, Deserialize)]
+pub struct Loop {
+    #[serde(rename = "endVal")]
+    end_val: u32,
+    #[serde(rename = "type")]
+    data_type: DataType,
 }
 
 struct NumericVisitor;
@@ -255,7 +266,37 @@ impl<'de> Visitor<'de> for ConditionalVisitor {
 
                 Ok(Conditional::Switch(switch))
             }
-            unknown_variant => Err(de::Error::unknown_variant(unknown_variant, &["switch"])),
+            "option" => {
+                let data_type = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                Ok(Conditional::Option(data_type))
+            }
+            unknown_variant => {
+                // Attempt to find switch with wrong type.
+                let mut map: HashMap<String, String> = seq.next_element()?.ok_or_else(|| {
+                    de::Error::unknown_variant(unknown_variant, &["switch", "option"])
+                })?;
+
+                if map.len() == 1 {
+                    if let Some(compare_to) = map.remove("compareTo") {
+                        let switch = Switch {
+                            name: Some(unknown_variant.to_owned()),
+                            compare_to,
+                            fields: LinkedHashMap::new(),
+                            default: None,
+                        };
+
+                        return Ok(Conditional::Switch(switch));
+                    }
+                }
+
+                Err(de::Error::unknown_variant(
+                    unknown_variant,
+                    &["switch", "option"],
+                ))
+            }
         }
     }
 }
@@ -375,10 +416,17 @@ impl<'de> Visitor<'de> for UtilVisitor {
 
                 Ok(Util::PrefixedString { count_type })
             }
-            unknown_variant => Err(de::Error::unknown_variant(
-                unknown_variant,
-                &["buffer", "mapper", "bitfield", "pstring"],
-            )),
+            unknown_variant => {
+                // This is what happens when the nodejs developers write a "cool" spec.
+                let loop_util: Loop = seq.next_element()?.ok_or_else(|| {
+                    de::Error::unknown_variant(
+                        unknown_variant,
+                        &["buffer", "mapper", "bitfield", "pstring"],
+                    )
+                })?;
+
+                Ok(Util::Loop(Box::new(loop_util)))
+            }
         }
     }
 }
@@ -394,10 +442,9 @@ impl<'de> Deserialize<'de> for Util {
 
 #[cfg(test)]
 mod tests {
-    use crate::data_type::Numeric::Int;
     use crate::data_type::{
-        Array, ArrayCount, Buffer, ByteOrder, Count, DataType, Field, Numeric, Primitive,
-        Structure, Util,
+        Array, ArrayCount, Buffer, ByteOrder, Conditional, Count, DataType, Field, Numeric,
+        Primitive, Structure, Switch, Util,
     };
     use serde_test::{assert_de_tokens, Token};
 
@@ -890,7 +937,7 @@ mod tests {
             &util,
             &[
                 Token::Seq { len: Some(2) },
-                Token::String("pstring"),
+                Token::Str("pstring"),
                 Token::Struct { name: "", len: 1 },
                 Token::Str("countType"),
                 Token::String("varint"),
@@ -903,7 +950,7 @@ mod tests {
     #[test]
     fn test_decode_buffer() {
         let util = Util::Buffer(Buffer {
-            count_type: Some(DataType::Numeric(Int {
+            count_type: Some(DataType::Numeric(Numeric::Int {
                 signed: true,
                 byte_order: ByteOrder::BigEndian,
             })),
@@ -920,9 +967,47 @@ mod tests {
                     name: "Buffer",
                     len: 1,
                 },
-                Token::Str("countType"),
+                Token::String("countType"),
                 Token::Some,
                 Token::String("i32"),
+                Token::StructEnd,
+                Token::SeqEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_decode_option() {
+        let conditional = Conditional::Option(DataType::Numeric(Numeric::Byte { signed: false }));
+
+        assert_de_tokens(
+            &conditional,
+            &[
+                Token::Seq { len: Some(2) },
+                Token::String("option"),
+                Token::String("u8"),
+                Token::SeqEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_decode_bad_switch() {
+        let conditional = Conditional::Switch(Switch {
+            name: Some("particleData".to_string()),
+            compare_to: "particleId".to_string(),
+            fields: Default::default(),
+            default: None,
+        });
+
+        assert_de_tokens(
+            &conditional,
+            &[
+                Token::Seq { len: Some(2) },
+                Token::String("particleData"),
+                Token::Struct { name: "", len: 1 },
+                Token::String("compareTo"),
+                Token::String("particleId"),
                 Token::StructEnd,
                 Token::SeqEnd,
             ],
