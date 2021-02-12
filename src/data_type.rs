@@ -116,6 +116,7 @@ pub enum Util {
     Bitfield(Vec<BitField>),
     PrefixedString { count_type: DataType },
     Loop(Box<Loop>),
+    TopBitSetTerminatedArray(Box<Structure>),
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -416,6 +417,17 @@ impl<'de> Visitor<'de> for UtilVisitor {
                     .ok_or_else(|| de::Error::missing_field("countType"))?;
 
                 Ok(Util::PrefixedString { count_type })
+            }
+            "topBitSetTerminatedArray" => {
+                let mut value: HashMap<String, Structure> = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                let structure = value
+                    .remove("type")
+                    .ok_or_else(|| de::Error::missing_field("type"))?;
+
+                Ok(Util::TopBitSetTerminatedArray(Box::new(structure)))
             }
             unknown_variant => {
                 // This is what happens when the nodejs developers write a "cool" spec.
