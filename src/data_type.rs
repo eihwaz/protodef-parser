@@ -72,12 +72,12 @@ pub enum Structure {
 pub struct Array {
     /// The type of length prefix.
     #[serde(rename = "countType")]
-    count_type: Option<DataType>,
+    pub count_type: Option<DataType>,
     /// A reference to the field counting the elements, or a fixed size.
-    count: Option<ArrayCount>,
+    pub count: Option<ArrayCount>,
     /// The type of the elements.
     #[serde(rename = "type")]
-    elements_type: DataType,
+    pub elements_type: DataType,
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
@@ -94,6 +94,7 @@ pub struct Field {
     pub name: Option<String>,
     #[serde(rename = "type")]
     pub field_type: DataType,
+    // Useless.
     #[serde(rename = "anon")]
     anonymous: Option<bool>,
 }
@@ -102,10 +103,10 @@ pub struct Field {
 pub struct Count {
     /// The type of count.
     #[serde(rename = "type")]
-    count_type: DataType,
+    pub count_type: DataType,
     /// A field to count for.
     #[serde(rename = "countFor")]
-    count_for: String,
+    pub count_for: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -131,23 +132,23 @@ pub struct Buffer {
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 pub struct Mapper {
     #[serde(rename = "type")]
-    mappings_type: String,
-    mappings: LinkedHashMap<String, String>,
+    pub mappings_type: String,
+    pub mappings: LinkedHashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct BitField {
-    name: String,
-    size: usize,
-    signed: bool,
+    pub name: String,
+    pub size: usize,
+    pub signed: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 pub struct Loop {
     #[serde(rename = "endVal")]
-    end_val: u32,
+    pub end_val: u32,
     #[serde(rename = "type")]
-    data_type: DataType,
+    pub data_type: DataType,
 }
 
 struct NumericVisitor;
