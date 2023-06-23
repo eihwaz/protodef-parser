@@ -43,11 +43,11 @@ pub enum Conditional {
 
 #[derive(Debug, Eq, PartialEq, Deserialize)]
 pub struct Switch {
-    name: Option<String>,
+    pub name: Option<String>,
     #[serde(rename = "compareTo")]
-    compare_to: String,
-    fields: LinkedHashMap<String, DataType>,
-    default: Option<DataType>,
+    pub compare_to: String,
+    pub fields: LinkedHashMap<String, DataType>,
+    pub default: Option<DataType>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
